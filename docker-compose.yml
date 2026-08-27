@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: sentinel
+    ports:
+      - "5432:5432"
+    volumes:
+      - sentinel_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  demo-api:
+    build:
+      context: .
+      dockerfile: docker/demo-api.Dockerfile
+    environment:
+      DEMO_API_PORT: 4000
+      NODE_ENV: production
+    ports:
+      - "4000:4000"
+
+  sentinel-gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      demo-api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      GATEWAY_PORT: 3000
+      BACKEND_URL: http://demo-api:4000
+      DATABASE_URL: postgresql://sentinel:sentinel@postgres:5432/sentinel
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-to-a-long-random-string-in-production
+      ADMIN_EMAIL: admin@sentinel.local
+      ADMIN_PASSWORD: changeme123
+      REDIS_FALLBACK_MODE: fail-open
+    ports:
+      - "3000:3000"
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_URL: http://localhost:3000
+    depends_on:
+      - sentinel-gateway
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_GATEWAY_URL: http://localhost:3000
+      GATEWAY_INTERNAL_URL: http://sentinel-gateway:3000
+    ports:
+      - "3001:3001"
+
+volumes:
+  sentinel_pgdata:
