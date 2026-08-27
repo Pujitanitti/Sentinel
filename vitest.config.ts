@@ -8,6 +8,7 @@ export default defineConfig({
       "apps/*/src/**/*.test.ts",
       "tests/unit/**/*.test.ts",
       "tests/integration/**/*.test.ts",
+      "tests/security/**/*.test.ts",
     ],
     testTimeout: 15000,
     hookTimeout: 15000,
