@@ -1,0 +1,25 @@
+{
+  "name": "@sentinel/database",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b && mkdir -p dist/migrations && cp src/migrations/*.sql dist/migrations/",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "@sentinel/shared": "*",
+    "@sentinel/logger": "*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}
