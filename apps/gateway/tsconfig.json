@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/logger" },
+    { "path": "../../packages/redis" },
+    { "path": "../../packages/database" },
+    { "path": "../../packages/rate-limiter" },
+    { "path": "../../packages/abuse-detector" }
+  ]
+}

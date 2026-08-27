@@ -1,0 +1,27 @@
+{
+  "name": "@sentinel/gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "fastify": "^5.1.0",
+    "@fastify/cors": "^10.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "@sentinel/shared": "*",
+    "@sentinel/config": "*",
+    "@sentinel/logger": "*",
+    "@sentinel/redis": "*",
+    "@sentinel/database": "*",
+    "@sentinel/rate-limiter": "*",
+    "@sentinel/abuse-detector": "*"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/bcryptjs": "^2.4.6"
+  }
+}
