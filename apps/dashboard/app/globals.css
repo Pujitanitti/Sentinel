@@ -1,0 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  background-color: #0a0d11;
+  color: #e7ebef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(62, 213, 152, 0.25);
+}
+
+/* Signature element: a soft phosphor pulse on the live-connection indicator,
+   evoking a NOC/SOC monitoring wall — deliberately restrained (one motion cue,
+   used once per page) rather than decorative animation everywhere. */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(62, 213, 152, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(62, 213, 152, 0);
+  }
+}
+
+.live-dot {
+  position: relative;
+}
+
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after {
+    animation: none;
+  }
+}
+
+/* Scrollbar tuned to the dark palette instead of the browser default */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #12161c;
+}
+::-webkit-scrollbar-thumb {
+  background: #232a33;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2c343f;
+}
