@@ -1,0 +1,33 @@
+{
+  "name": "sentinel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sentinel — API Rate-Limit & Abuse Detection Gateway",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev --workspace=@sentinel/gateway",
+    "dev:demo-api": "npm run dev --workspace=@sentinel/demo-api",
+    "dev:dashboard": "npm run dev --workspace=@sentinel/dashboard",
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -b --noEmit",
+    "db:migrate": "npm run migrate --workspace=@sentinel/database",
+    "lint": "echo 'lint placeholder - add eslint if desired'"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.4",
+    "@vitest/coverage-v8": "^2.1.4",
+    "@types/node": "^22.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
