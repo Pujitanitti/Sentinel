@@ -2,7 +2,7 @@
 
 **Sentinel** is an API gateway that protects backend services using configurable rate limiting and explainable, rule-based abuse detection. It uses Redis for high-frequency request state, PostgreSQL for durable configuration and security-event history, and ships with an observability dashboard and a real traffic simulator for demonstrating gateway behavior end to end.
 
-This is a portfolio/interview project. It is a real, working system — every rate limit, every abuse-detection rule, and every dashboard number is backed by live code and live data, not mocked. See [`docs/interview-guide.md`](docs/interview-guide.md) for an honest breakdown of what's production-ready versus simplified for local development.
+This is a portfolio/interview project. It is a real, working system — every rate limit, every abuse-detection rule, and every dashboard number is backed by live code and live data, not mocked. See [`docs/interview-guide.md`](docs/interview-guide.md) for an honest breakdown of what's production-ready versus simplified for local development, or [`docs/portfolio-case-study.md`](docs/portfolio-case-study.md) for the narrative version (what it does, why it's built this way, and the real bugs found along the way).
 
 ```
 Client
