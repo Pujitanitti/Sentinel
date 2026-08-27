@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b",
     "db:migrate": "npm run migrate --workspace=@sentinel/database",
     "lint": "echo 'lint placeholder - add eslint if desired'"
   },

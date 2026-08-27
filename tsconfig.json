@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/config" },
+    { "path": "./packages/logger" },
+    { "path": "./packages/redis" },
+    { "path": "./packages/database" },
+    { "path": "./packages/rate-limiter" },
+    { "path": "./packages/abuse-detector" },
+    { "path": "./apps/gateway" },
+    { "path": "./apps/demo-api" }
+  ]
+}
