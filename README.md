@@ -172,6 +172,10 @@ for i in $(seq 1 15); do curl -s -o /dev/null http://localhost:3000/error; done
 
 Watch the Overview/Traffic/Security pages in the dashboard update in real time.
 
+## Screenshots
+
+Not included in this build — generating them required a headless browser, which wasn't obtainable in the sandboxed environment this project was built in (confirmed: both Playwright's Chromium download and Ubuntu's `chromium-browser` package require network hosts outside that environment's allowlist). Run `npm run dev:dashboard` and open `http://localhost:3001` to see it live; it's a genuinely rendered Next.js app, not a mockup.
+
 ## System design decisions & tradeoffs
 
 See [`docs/system-design.md`](docs/system-design.md).
