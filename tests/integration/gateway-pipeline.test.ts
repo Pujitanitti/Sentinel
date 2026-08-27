@@ -79,6 +79,40 @@ describe("gateway pipeline integration", () => {
     const res = await built.app.inject({ method: "GET", url: "/products", headers: { "x-api-key": "sk_live_bogus" } });
     expect(res.statusCode).toBe(200);
   });
+
+  it("forwards a request with no rate-limit headers when it happens to match zero policies", async () => {
+    // The seeded policies are login-protection (/login), public-api (/api/*), and
+    // default-catch-all (/*) — so in practice every route matches at least the
+    // catch-all. This test disables all policies to exercise the genuinely
+    // unrestricted path: no matching policy should mean "forward normally",
+    // not "error" or "deny by default".
+    const loginRes = await built.app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: TEST_CONFIG.ADMIN_EMAIL, password: TEST_CONFIG.ADMIN_PASSWORD },
+    });
+    const { token } = loginRes.json();
+    const auth = { authorization: `Bearer ${token}` };
+
+    const { policies } = (
+      await built.app.inject({ method: "GET", url: "/admin/policies", headers: auth })
+    ).json();
+    await Promise.all(
+      policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: false } }))
+    );
+    // Policy cache refreshes on a 5s interval in production; force it here.
+    await built.policyCache.forceRefresh();
+
+    const res = await built.app.inject({ method: "GET", url: "/products" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBeUndefined();
+
+    // Restore policies for subsequent tests in this file.
+    await Promise.all(
+      policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: true } }))
+    );
+    await built.policyCache.forceRefresh();
+  });
 });
 
 describe("admin API integration", () => {

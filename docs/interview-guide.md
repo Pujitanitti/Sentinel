@@ -59,7 +59,7 @@ Today, metrics are in-process (`MetricsStore`) and exposed via a JSON snapshot e
 - Full admin API (policies, API keys, blocks, metrics, logs, security events) with JWT auth, and a dashboard consuming all of it live.
 - Real reverse proxy — verified end-to-end against a real backend, including a genuine 502 test for backend-unreachable.
 - Temporary auto-blocking with a real fixed race condition (concurrent duplicate-block writes), caught via manual load testing, not just theorized.
-- 46 automated tests (unit + integration) covering rate limiter, abuse detector, config, policy matching, API-key hashing, and the full gateway pipeline via `fastify.inject`.
+- 52 automated tests (unit + integration) covering rate limiter, abuse detector, config, policy matching, API-key hashing, and the full gateway pipeline via `fastify.inject`.
 
 **Known simplifications (would change for production):**
 - Metrics are in-process, not shipped to a real time-series backend.

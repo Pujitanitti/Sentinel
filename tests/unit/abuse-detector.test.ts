@@ -5,6 +5,7 @@ import { createLogger } from "@sentinel/logger";
 import { detectBurst, detectAuthFailures, detectEndpointScanning, detectHighErrorRate } from "@sentinel/abuse-detector";
 import { DEFAULT_ABUSE_CONFIG } from "@sentinel/abuse-detector";
 import { scoreToBand, bandToDecision, clampScore } from "@sentinel/shared";
+import { setTemporaryBlock, getTemporaryBlock, removeTemporaryBlock } from "@sentinel/redis";
 
 const logger = createLogger({ name: "test", level: "silent" });
 
@@ -137,5 +138,49 @@ describe("abuse detector integration (real Redis)", () => {
     const a = await detector.getCurrentAssessment(identity);
     const b = await detector.getCurrentAssessment(identity);
     expect(a.score).toBe(b.score);
+  });
+
+  describe("temporary blocking (Redis-backed)", () => {
+    it("sets a block and makes it visible via getTemporaryBlock", async () => {
+      const won = await setTemporaryBlock(client, "ip:20.0.0.1", "test-reason", 5);
+      expect(won).toBe(true);
+
+      const block = await getTemporaryBlock(client, "ip:20.0.0.1");
+      expect(block).not.toBeNull();
+      expect(block?.reason).toBe("test-reason");
+      expect(block?.ttlSeconds).toBeGreaterThan(0);
+    });
+
+    it("returns null for an identity that was never blocked", async () => {
+      const block = await getTemporaryBlock(client, "ip:20.0.0.2");
+      expect(block).toBeNull();
+    });
+
+    it("does not let a second call overwrite an active block (atomic SET NX)", async () => {
+      const first = await setTemporaryBlock(client, "ip:20.0.0.3", "first-reason", 5);
+      const second = await setTemporaryBlock(client, "ip:20.0.0.3", "second-reason", 5);
+      expect(first).toBe(true);
+      expect(second).toBe(false);
+
+      const block = await getTemporaryBlock(client, "ip:20.0.0.3");
+      expect(block?.reason).toBe("first-reason"); // the second call did not win the race
+    });
+
+    it("expires automatically after its TTL elapses", async () => {
+      await setTemporaryBlock(client, "ip:20.0.0.4", "short-lived", 1);
+      const immediately = await getTemporaryBlock(client, "ip:20.0.0.4");
+      expect(immediately).not.toBeNull();
+
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const afterExpiry = await getTemporaryBlock(client, "ip:20.0.0.4");
+      expect(afterExpiry).toBeNull();
+    });
+
+    it("can be removed manually before its TTL elapses", async () => {
+      await setTemporaryBlock(client, "ip:20.0.0.5", "manual-removal-test", 60);
+      await removeTemporaryBlock(client, "ip:20.0.0.5");
+      const block = await getTemporaryBlock(client, "ip:20.0.0.5");
+      expect(block).toBeNull();
+    });
   });
 });

@@ -32,6 +32,11 @@ export class PolicyCache {
     this.policies = await this.repo.listEnabled();
   }
 
+  /** Immediately re-reads policies from Postgres, bypassing the 5s interval. Used by tests. */
+  async forceRefresh(): Promise<void> {
+    await this.refresh();
+  }
+
   /** Returns every enabled policy whose route+method pattern matches this request. */
   matchingPolicies(path: string, method: string): Policy[] {
     return this.policies.filter((p) => matchesRoute(p.route, path) && matchesMethod(p.method, method));

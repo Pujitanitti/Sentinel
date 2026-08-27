@@ -149,7 +149,7 @@ See [`.env.example`](.env.example) for the full list with defaults. Key ones:
 npm test
 ```
 
-46 tests across unit (rate-limiter strategies, abuse-detection rules, policy matching, API-key hashing, config validation) and integration (full gateway pipeline via `fastify.inject`, admin API CRUD flows) — all run against real Redis/Postgres, not mocks. See [`docs/interview-guide.md`](docs/interview-guide.md) for what's covered and what isn't.
+52 tests across unit (rate-limiter strategies, abuse-detection rules, temporary blocking, policy matching, API-key hashing, config validation) and integration (full gateway pipeline via `fastify.inject`, admin API CRUD flows, unmatched-policy behavior) — all run against real Redis/Postgres, not mocks. See [`docs/interview-guide.md`](docs/interview-guide.md) for what's covered and what isn't.
 
 ## Running the demo attack scenarios
 

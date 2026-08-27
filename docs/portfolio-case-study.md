@@ -56,7 +56,7 @@ This is the part I'm most proud of, because it's what separates "I wrote code th
 
 ## Results
 
-- 46 automated tests (unit + integration), all passing against real Redis and Postgres — not mocks.
+- 52 automated tests (unit + integration), all passing against real Redis and Postgres — not mocks.
 - Verified end-to-end by hand: fired real burst traffic, real credential-stuffing attempts, and real endpoint-scanning patterns through the running gateway and watched the dashboard update live.
 - A one-click traffic simulator in the dashboard that sends genuine HTTP requests through the gateway for five attack scenarios, for easy interview demonstration.
 
