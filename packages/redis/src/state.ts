@@ -22,53 +22,51 @@ export interface SlidingWindowResult {
   allowed: boolean;
   count: number;
   oldestTimestampMs: number;
+  nowMs: number;
 }
 
 export async function evalSlidingWindow(
   client: RedisClient,
   key: string,
-  nowMs: number,
   windowMs: number,
   limit: number
 ): Promise<SlidingWindowResult> {
-  const member = `${nowMs}-${Math.random().toString(36).slice(2, 10)}`;
-  const [allowed, count, oldest] = (await client.eval(
+  const member = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const [allowed, count, oldest, nowMs] = (await client.eval(
     SLIDING_WINDOW_SCRIPT,
     1,
     key,
-    String(nowMs),
     String(windowMs),
     String(limit),
     member
-  )) as [number, number, number];
-  return { allowed: allowed === 1, count, oldestTimestampMs: oldest };
+  )) as [number, number, number, number];
+  return { allowed: allowed === 1, count, oldestTimestampMs: oldest, nowMs };
 }
 
 export interface TokenBucketResult {
   allowed: boolean;
   tokensRemaining: number;
+  nowMs: number;
 }
 
 export async function evalTokenBucket(
   client: RedisClient,
   key: string,
-  nowSeconds: number,
   capacity: number,
   refillRatePerSecond: number,
   requested: number,
   ttlSeconds: number
 ): Promise<TokenBucketResult> {
-  const [allowed, tokensX1000] = (await client.eval(
+  const [allowed, tokensX1000, nowMs] = (await client.eval(
     TOKEN_BUCKET_SCRIPT,
     1,
     key,
-    String(nowSeconds),
     String(capacity),
     String(refillRatePerSecond),
     String(requested),
     String(ttlSeconds)
-  )) as [number, number];
-  return { allowed: allowed === 1, tokensRemaining: tokensX1000 / 1000 };
+  )) as [number, number, number];
+  return { allowed: allowed === 1, tokensRemaining: tokensX1000 / 1000, nowMs };
 }
 
 // ---------------------------------------------------------------------------

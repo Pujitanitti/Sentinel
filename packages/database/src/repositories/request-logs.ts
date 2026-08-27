@@ -59,6 +59,46 @@ export class RequestLogRepository {
     );
   }
 
+  /**
+   * Batched insert for the gateway's log buffer — one round-trip for many
+   * rows, instead of one round-trip per request. Uses a single multi-row
+   * INSERT rather than a transaction-wrapped loop, since these rows have no
+   * relationships to each other and partial success (some rows inserted, one
+   * malformed row skipped) is preferable to an all-or-nothing failure for
+   * this non-critical telemetry data.
+   */
+  async createMany(entries: (RequestLogEntry & { policyName?: string; riskScore?: number })[]): Promise<void> {
+    if (entries.length === 0) return;
+
+    const columns = 9;
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+
+    entries.forEach((entry, i) => {
+      const base = i * columns;
+      placeholders.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`
+      );
+      values.push(
+        entry.requestId,
+        entry.method,
+        entry.path,
+        entry.status,
+        entry.latencyMs,
+        entry.identity,
+        entry.decision,
+        entry.policyName ?? null,
+        entry.riskScore ?? null
+      );
+    });
+
+    await this.pool.query(
+      `INSERT INTO request_logs (request_id, method, path, status, latency_ms, identity, decision, policy_name, risk_score)
+       VALUES ${placeholders.join(", ")}`,
+      values
+    );
+  }
+
   async search(filters: RequestLogFilters): Promise<RequestLogEntry[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];

@@ -12,6 +12,7 @@ import { resolveIdentity } from "./identity.js";
 import { forwardToBackend } from "./proxy.js";
 import { MetricsStore } from "./metrics.js";
 import { shouldEmitEvent } from "./event-dedupe.js";
+import type { RequestLogBuffer } from "./log-buffer.js";
 
 export interface PipelineDeps {
   redis: RedisClient;
@@ -21,6 +22,7 @@ export interface PipelineDeps {
   apiKeys: ApiKeyRepository;
   securityEvents: SecurityEventRepository;
   requestLogs: RequestLogRepository;
+  requestLogBuffer: RequestLogBuffer;
   blocks: BlockRepository;
   metrics: MetricsStore;
   logger: Logger;
@@ -50,6 +52,84 @@ function pickMostRestrictive(results: RateLimitResult[]): RateLimitResult | null
 
 function sendError(reply: FastifyReply, status: number, body: GatewayErrorBody): void {
   reply.code(status).send(body);
+}
+
+const DECISION_SEVERITY: Record<GatewayDecision, number> = { ALLOW: 0, ALLOW_MONITOR: 1, THROTTLE: 2, BLOCK: 3 };
+
+function worseDecision(a: GatewayDecision, b: GatewayDecision): GatewayDecision {
+  return DECISION_SEVERITY[a] >= DECISION_SEVERITY[b] ? a : b;
+}
+
+/**
+ * Handles one identity's post-response abuse assessment: may create a new
+ * temporary block and/or emit security events for that identity specifically.
+ *
+ * IDENTITY MODEL NOTE: each identity (IP, API key) keeps its own independent
+ * risk score/history in Redis — this is not double-counting the same signal,
+ * it's recording the same real request from two different observation angles.
+ * An IP-scoped score catches abuse from anonymous/shared-IP traffic; an
+ * API-key-scoped score catches an authenticated abuser even if they rotate
+ * source IPs. A single request can therefore justifiably move both scores.
+ */
+async function handlePostAssessment(
+  deps: PipelineDeps,
+  identity: Identity,
+  path: string,
+  assessment: Awaited<ReturnType<AbuseDetector["recordAndAssess"]>>
+): Promise<void> {
+  const key = identityString(identity);
+
+  if (assessment.decision === "BLOCK") {
+    const reason = assessment.breakdown.map((b) => b.rule).join(", ") || "risk score threshold exceeded";
+    const wonRace = await setTemporaryBlock(deps.redis, key, reason, TEMP_BLOCK_TTL_SECONDS).catch((err) => {
+      deps.logger.error({ err: String(err) }, "failed to set temporary block");
+      return false;
+    });
+
+    // Only the request that actually created the block (SET NX succeeded)
+    // persists the audit record and emits the event — otherwise concurrent
+    // requests hitting BLOCK at the same time would each write a duplicate row.
+    if (wonRace) {
+      await deps.blocks
+        .record({
+          identityType: identity.type,
+          identityValue: identity.value,
+          reason,
+          expiresAt: new Date(Date.now() + TEMP_BLOCK_TTL_SECONDS * 1000),
+        })
+        .catch((err) => deps.logger.error({ err: String(err) }, "failed to persist block record"));
+
+      if (await shouldEmitEvent(deps.redis, "TEMPORARY_BLOCK", key)) {
+        await deps.securityEvents
+          .create({
+            type: "TEMPORARY_BLOCK",
+            identityType: identity.type,
+            identityValue: identity.value,
+            route: path,
+            riskScore: assessment.score,
+            metadata: { breakdown: assessment.breakdown },
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  for (const entry of assessment.breakdown) {
+    const eventType = RULE_TO_EVENT_TYPE[entry.rule];
+    if (!eventType) continue;
+    if (await shouldEmitEvent(deps.redis, eventType, key)) {
+      await deps.securityEvents
+        .create({
+          type: eventType,
+          identityType: identity.type,
+          identityValue: identity.value,
+          route: path,
+          riskScore: assessment.score,
+          metadata: { rule: entry.rule, reason: entry.reason },
+        })
+        .catch(() => undefined);
+    }
+  }
 }
 
 export async function handleProxyRequest(req: FastifyRequest, reply: FastifyReply, deps: PipelineDeps): Promise<void> {
@@ -150,9 +230,14 @@ export async function handleProxyRequest(req: FastifyRequest, reply: FastifyRepl
     return;
   }
 
-  // 3. Pre-request abuse assessment (cheap check based on existing history/score).
-  const preAssessment = await deps.abuseDetector.getCurrentAssessment(ipIdentity);
-  if (preAssessment.decision === "BLOCK") {
+  // 3. Pre-request abuse assessment (cheap check based on existing history/score),
+  // evaluated for every resolved identity — an IP block AND an API-key block are
+  // both enforceable, whichever fires first.
+  const preAssessments = await Promise.all(identities.map((identity) => deps.abuseDetector.getCurrentAssessment(identity)));
+  const worstPreDecision = preAssessments.reduce((worst, a) => worseDecision(worst, a.decision), "ALLOW" as GatewayDecision);
+  const worstPreScore = Math.max(...preAssessments.map((a) => a.score));
+
+  if (worstPreDecision === "BLOCK") {
     decision = "BLOCK";
     finalStatus = 403;
     sendError(reply, 403, {
@@ -160,13 +245,13 @@ export async function handleProxyRequest(req: FastifyRequest, reply: FastifyRepl
       message: "Request blocked due to high abuse risk score",
       requestId,
     });
-    await finalize({ deps, req, requestId, path, method, ip, identityStr: primaryIdentityStr, decision, status: finalStatus, startedAt, policyName: matchedPolicyName, riskScore: preAssessment.score, apiKeyId: apiKey?.recordId });
+    await finalize({ deps, req, requestId, path, method, ip, identityStr: primaryIdentityStr, decision, status: finalStatus, startedAt, policyName: matchedPolicyName, riskScore: worstPreScore, apiKeyId: apiKey?.recordId });
     return;
   }
-  if (preAssessment.decision === "THROTTLE") {
+  if (worstPreDecision === "THROTTLE") {
     decision = "THROTTLE";
     await new Promise((resolve) => setTimeout(resolve, THROTTLE_DELAY_MS));
-  } else if (preAssessment.decision === "ALLOW_MONITOR") {
+  } else if (worstPreDecision === "ALLOW_MONITOR") {
     decision = "ALLOW_MONITOR";
   }
 
@@ -193,68 +278,17 @@ export async function handleProxyRequest(req: FastifyRequest, reply: FastifyRepl
     reply.code(finalStatus).send(proxyResult.response.body);
   }
 
-  // 5. Post-response abuse accounting — this is what actually updates history/score
-  // for the NEXT request, and is where new blocks get triggered.
-  const postAssessment = await deps.abuseDetector.recordAndAssess({
-    identity: ipIdentity,
-    path,
-    method,
-    status: finalStatus,
-  });
+  // 5. Post-response abuse accounting for EVERY resolved identity — this is what
+  // actually updates history/score for the NEXT request, and is where new
+  // blocks get triggered. Recording against both IP and API-key identities
+  // (when present) means an authenticated abuser can't evade detection just by
+  // rotating source IPs, and anonymous/shared-IP abuse is still caught too.
+  const postAssessments = await Promise.all(
+    identities.map((identity) => deps.abuseDetector.recordAndAssess({ identity, path, method, status: finalStatus }))
+  );
+  const worstPostScore = Math.max(...postAssessments.map((a) => a.score));
 
-  if (postAssessment.decision === "BLOCK") {
-    const key = identityString(ipIdentity);
-    const reason = postAssessment.breakdown.map((b) => b.rule).join(", ") || "risk score threshold exceeded";
-    const wonRace = await setTemporaryBlock(deps.redis, key, reason, TEMP_BLOCK_TTL_SECONDS).catch((err) => {
-      deps.logger.error({ err: String(err) }, "failed to set temporary block");
-      return false;
-    });
-
-    // Only the request that actually created the block (SET NX succeeded)
-    // persists the audit record and emits the event — otherwise concurrent
-    // requests hitting BLOCK at the same time would each write a duplicate row.
-    if (wonRace) {
-      await deps.blocks
-        .record({
-          identityType: ipIdentity.type,
-          identityValue: ipIdentity.value,
-          reason,
-          expiresAt: new Date(Date.now() + TEMP_BLOCK_TTL_SECONDS * 1000),
-        })
-        .catch((err) => deps.logger.error({ err: String(err) }, "failed to persist block record"));
-
-      if (await shouldEmitEvent(deps.redis, "TEMPORARY_BLOCK", key)) {
-        await deps.securityEvents
-          .create({
-            type: "TEMPORARY_BLOCK",
-            identityType: ipIdentity.type,
-            identityValue: ipIdentity.value,
-            route: path,
-            riskScore: postAssessment.score,
-            metadata: { breakdown: postAssessment.breakdown },
-          })
-          .catch(() => undefined);
-      }
-    }
-  }
-
-  for (const entry of postAssessment.breakdown) {
-    const eventType = RULE_TO_EVENT_TYPE[entry.rule];
-    if (!eventType) continue;
-    const key = identityString(ipIdentity);
-    if (await shouldEmitEvent(deps.redis, eventType, key)) {
-      await deps.securityEvents
-        .create({
-          type: eventType,
-          identityType: ipIdentity.type,
-          identityValue: ipIdentity.value,
-          route: path,
-          riskScore: postAssessment.score,
-          metadata: { rule: entry.rule, reason: entry.reason },
-        })
-        .catch(() => undefined);
-    }
-  }
+  await Promise.all(identities.map((identity, i) => handlePostAssessment(deps, identity, path, postAssessments[i]!)));
 
   await finalize({
     deps,
@@ -268,7 +302,7 @@ export async function handleProxyRequest(req: FastifyRequest, reply: FastifyRepl
     status: finalStatus,
     startedAt,
     policyName: matchedPolicyName,
-    riskScore: postAssessment.score,
+    riskScore: worstPostScore,
     apiKeyId: apiKey?.recordId,
   });
 }
@@ -316,18 +350,16 @@ async function finalize(input: FinalizeInput): Promise<void> {
     "request handled"
   );
 
-  await input.deps.requestLogs
-    .create({
-      timestamp: new Date().toISOString(),
-      requestId: input.requestId,
-      method: input.method,
-      path: input.path,
-      status: input.status,
-      latencyMs,
-      identity: input.identityStr,
-      decision: input.decision,
-      policyName: input.policyName,
-      riskScore: input.riskScore,
-    })
-    .catch((err) => input.deps.logger.error({ err: String(err) }, "failed to persist request log"));
+  input.deps.requestLogBuffer.push({
+    timestamp: new Date().toISOString(),
+    requestId: input.requestId,
+    method: input.method,
+    path: input.path,
+    status: input.status,
+    latencyMs,
+    identity: input.identityStr,
+    decision: input.decision,
+    policyName: input.policyName,
+    riskScore: input.riskScore,
+  });
 }

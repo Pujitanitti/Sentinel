@@ -32,6 +32,20 @@ const EnvSchema = z.object({
 
   // Failure-handling behavior
   REDIS_FALLBACK_MODE: z.enum(["fail-open", "fail-closed"]).default("fail-open"),
+
+  // Proxy trust model — see SECURITY note in README before changing this.
+  // "false": trust nothing but the raw socket connection (correct default when
+  //   the gateway is directly internet-facing, as in this project's docker-compose).
+  // "true": trust X-Forwarded-For unconditionally — ONLY correct if a real,
+  //   properly-configured reverse proxy sits in front and strips/overwrites
+  //   any client-supplied X-Forwarded-For before it reaches Sentinel.
+  // A CIDR string or comma-separated list of CIDRs: trust X-Forwarded-For only
+  //   when the immediate connecting peer is within that range (the standard,
+  //   safest way to use a specific known reverse proxy).
+  TRUST_PROXY: z.string().default("false"),
+
+  // CORS: comma-separated list of allowed origins for the admin API/dashboard.
+  ALLOWED_ORIGINS: z.string().default("http://localhost:3001"),
 });
 
 export type SentinelEnv = z.infer<typeof EnvSchema>;

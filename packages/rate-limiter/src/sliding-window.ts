@@ -15,10 +15,9 @@ export async function slidingWindowCheck(
   limit: number,
   windowSeconds: number
 ): Promise<RateLimitResult> {
-  const nowMs = Date.now();
   const windowMs = windowSeconds * 1000;
 
-  const { allowed, count, oldestTimestampMs } = await evalSlidingWindow(client, redisKey, nowMs, windowMs, limit);
+  const { allowed, count, oldestTimestampMs, nowMs } = await evalSlidingWindow(client, redisKey, windowMs, limit);
 
   const remaining = Math.max(0, limit - count);
   const resetAt = Math.floor((oldestTimestampMs > 0 ? oldestTimestampMs + windowMs : nowMs + windowMs) / 1000);

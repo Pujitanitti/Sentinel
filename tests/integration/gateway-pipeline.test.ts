@@ -14,12 +14,34 @@ const TEST_CONFIG: SentinelEnv = {
   ADMIN_EMAIL: "admin@sentinel.local",
   ADMIN_PASSWORD: "changeme123",
   REDIS_FALLBACK_MODE: "fail-open",
+  TRUST_PROXY: "false",
+  ALLOWED_ORIGINS: "http://localhost:3001,http://test-origin.example",
 };
 
 let built: BuiltApp;
 
 beforeAll(async () => {
   built = await buildApp(TEST_CONFIG);
+
+  // Defense in depth: ensure every existing policy starts enabled, regardless
+  // of what a previous (possibly crashed) test run may have left behind. The
+  // try/finally in the "zero policies" test below is the primary fix; this is
+  // a second line of defense so the suite is self-healing either way.
+  const loginRes = await built.app.inject({
+    method: "POST",
+    url: "/auth/login",
+    payload: { email: TEST_CONFIG.ADMIN_EMAIL, password: TEST_CONFIG.ADMIN_PASSWORD },
+  });
+  const { token } = loginRes.json();
+  const { policies } = (await built.app.inject({ method: "GET", url: "/admin/policies", headers: { authorization: `Bearer ${token}` } })).json();
+  await Promise.all(
+    policies
+      .filter((p: { enabled: boolean }) => !p.enabled)
+      .map((p: { id: string }) =>
+        built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: { authorization: `Bearer ${token}` }, payload: { enabled: true } })
+      )
+  );
+  await built.policyCache.forceRefresh();
 });
 
 beforeEach(async () => {
@@ -28,6 +50,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   built.policyCache.stop();
+  built.requestLogBuffer.stop();
   await built.app.close();
   await built.pool.end();
   built.redis.disconnect();
@@ -70,6 +93,8 @@ describe("gateway pipeline integration", () => {
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe("BAD_GATEWAY");
     brokenApp.policyCache.stop();
+    brokenApp.requestLogBuffer.stop();
+    await brokenApp.requestLogBuffer.flush().catch(() => undefined);
     await brokenApp.app.close();
     await brokenApp.pool.end();
     brokenApp.redis.disconnect();
@@ -97,21 +122,29 @@ describe("gateway pipeline integration", () => {
     const { policies } = (
       await built.app.inject({ method: "GET", url: "/admin/policies", headers: auth })
     ).json();
-    await Promise.all(
-      policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: false } }))
-    );
-    // Policy cache refreshes on a 5s interval in production; force it here.
-    await built.policyCache.forceRefresh();
 
-    const res = await built.app.inject({ method: "GET", url: "/products" });
-    expect(res.statusCode).toBe(200);
-    expect(res.headers["x-ratelimit-limit"]).toBeUndefined();
+    // try/finally: if the assertion below throws, policies MUST still be
+    // restored — otherwise a single failed test run corrupts the shared
+    // Postgres database for every subsequent test run (this happened once
+    // during development: an unrelated backend outage failed this test
+    // mid-way, left every policy disabled, and cascaded into two unrelated
+    // test failures on the next run).
+    try {
+      await Promise.all(
+        policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: false } }))
+      );
+      // Policy cache refreshes on a 5s interval in production; force it here.
+      await built.policyCache.forceRefresh();
 
-    // Restore policies for subsequent tests in this file.
-    await Promise.all(
-      policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: true } }))
-    );
-    await built.policyCache.forceRefresh();
+      const res = await built.app.inject({ method: "GET", url: "/products" });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-ratelimit-limit"]).toBeUndefined();
+    } finally {
+      await Promise.all(
+        policies.map((p: { id: string }) => built.app.inject({ method: "PUT", url: `/admin/policies/${p.id}`, headers: auth, payload: { enabled: true } }))
+      );
+      await built.policyCache.forceRefresh();
+    }
   });
 });
 

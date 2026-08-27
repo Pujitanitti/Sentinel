@@ -30,18 +30,26 @@ return { count, ttl }
 /**
  * Sliding window log using a sorted set of request timestamps (ms).
  * KEYS[1] = zset key
- * ARGV[1] = nowMs
- * ARGV[2] = windowMs
- * ARGV[3] = limit
- * ARGV[4] = member (unique per request, e.g. "<nowMs>-<random>")
- * Returns: { allowed(0/1), count, oldestTimestampMs }
+ * ARGV[1] = windowMs
+ * ARGV[2] = limit
+ * ARGV[3] = member (unique per request, e.g. a random string — uniqueness is
+ *           all that's needed since Redis's own clock supplies the score)
+ * Returns: { allowed(0/1), count, oldestTimestampMs, nowMs }
+ *
+ * Using Redis's TIME command (not a timestamp passed in from the calling
+ * Node process) means this is correct even if multiple gateway instances'
+ * system clocks have drifted relative to each other — Redis is the single
+ * source of truth for "now", which is what "distributed" correctness
+ * actually requires.
  */
 export const SLIDING_WINDOW_SCRIPT = `
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local windowMs = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local member = ARGV[4]
+local windowMs = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local member = ARGV[3]
+
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 
 redis.call('ZREMRANGEBYSCORE', key, 0, now - windowMs)
 local count = redis.call('ZCARD', key)
@@ -55,29 +63,33 @@ end
 if count < limit then
   redis.call('ZADD', key, now, member)
   redis.call('PEXPIRE', key, windowMs)
-  return { 1, count + 1, oldest }
+  return { 1, count + 1, oldest, now }
 else
-  return { 0, count, oldest }
+  return { 0, count, oldest, now }
 end
 `;
 
 /**
  * Token bucket. State stored as a hash: { tokens, timestamp }.
  * KEYS[1] = bucket key
- * ARGV[1] = nowSeconds (float, ms precision as decimal)
- * ARGV[2] = capacity
- * ARGV[3] = refillRatePerSecond
- * ARGV[4] = requestedTokens (usually 1)
- * ARGV[5] = ttlSeconds (key expiry so idle buckets don't leak memory)
- * Returns: { allowed(0/1), tokensRemaining (x1000 as integer for precision) }
+ * ARGV[1] = capacity
+ * ARGV[2] = refillRatePerSecond
+ * ARGV[3] = requestedTokens (usually 1)
+ * ARGV[4] = ttlSeconds (key expiry so idle buckets don't leak memory)
+ * Returns: { allowed(0/1), tokensRemaining (x1000 as integer for precision), nowMs }
+ *
+ * Also uses Redis TIME rather than a client-supplied timestamp — see the
+ * sliding-window script's comment above for why this matters.
  */
 export const TOKEN_BUCKET_SCRIPT = `
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local capacity = tonumber(ARGV[2])
-local refillRate = tonumber(ARGV[3])
-local requested = tonumber(ARGV[4])
-local ttl = tonumber(ARGV[5])
+local capacity = tonumber(ARGV[1])
+local refillRate = tonumber(ARGV[2])
+local requested = tonumber(ARGV[3])
+local ttl = tonumber(ARGV[4])
+
+local time = redis.call('TIME')
+local now = tonumber(time[1]) + tonumber(time[2]) / 1000000
 
 local data = redis.call('HMGET', key, 'tokens', 'timestamp')
 local tokens = tonumber(data[1])
@@ -101,5 +113,5 @@ end
 redis.call('HMSET', key, 'tokens', tokens, 'timestamp', now)
 redis.call('EXPIRE', key, ttl)
 
-return { allowed, math.floor(tokens * 1000) }
+return { allowed, math.floor(tokens * 1000), math.floor(now * 1000) }
 `;
