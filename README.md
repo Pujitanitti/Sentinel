@@ -498,23 +498,3 @@ done
 ```
 
 Or use the **Simulator** page in the dashboard for one-click versions of these scenarios, plus burst traffic and error-flood patterns.
-
----
-
-## Interview Talking Points
-
-- **Why Redis for rate limiting, not Postgres?** Disposable, high-frequency counters need atomic in-memory operations, not disk-durable transactions.
-- **Why three algorithms?** Different routes have different tradeoffs — see [Rate Limiting](#rate-limiting).
-- **Why Lua scripts specifically?** Atomicity — a read-then-write in application code races under concurrency; a single Lua script executes as one atomic Redis operation.
-- **What happens under concurrency?** Verified directly — a real race condition in temporary-block creation was found via load testing and fixed with an atomic `SET NX`.
-- **How does identity resolution work, and what's the biggest risk in it?** IP + optional API key, each independently rate-limited and risk-scored. The biggest risk is trusting a client-supplied IP header without a real reverse proxy validating it — see [Threat Model](#threat-model).
-- **What are the false-positive risks in abuse detection?** Global fixed thresholds mean a legitimately bursty (but honest) client can trip the same rules as an attacker — see [Abuse Detection](#abuse-detection) limitations.
-- **What happens if Redis fails?** Configurable fail-open/fail-closed, tested in both modes.
-- **How is login protected, and why does the order of operations matter?** Rate-limit check runs before any database lookup or bcrypt verification, so a flood of login attempts can't be used to burn server CPU.
-- **What would you change for production?** Per-policy abuse thresholds, Prometheus metrics export, httpOnly-cookie admin sessions, multi-instance load testing, and a real reverse proxy in front if `TRUST_PROXY` needs to move off its default.
-
----
-
-## What This Project Demonstrates
-
-Backend engineering · Redis (Lua scripting, atomicity) · PostgreSQL (schema design, migrations) · Fastify · Next.js · TypeScript (project-references monorepo) · distributed-state concepts · concurrency and race-condition debugging · API design · adversarial security thinking · automated testing (unit/integration/security) · system design tradeoffs · cold-state build verification · observability
